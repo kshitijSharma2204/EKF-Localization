@@ -64,7 +64,7 @@ void drawTrajectories(
 ) {
   canvas.setTo(cv::Scalar(255,255,255));
 
-  // 1) Compute axis-aligned bounding box of all data points so far
+  // Compute axis-aligned bounding box of all data points so far
   float min_x =  std::numeric_limits<float>::infinity();
   float min_y =  std::numeric_limits<float>::infinity();
   float max_x = -std::numeric_limits<float>::infinity();
@@ -84,7 +84,7 @@ void drawTrajectories(
 
   scan(gt);   scan(dr);   scan(obs);   scan(ekf_pts);
 
-  // 2) Determine scale and offset to fit all points with a margin
+  // Determine scale and offset to fit all points with a margin
   const float margin = 20.0f;
   float sx = (canvas.cols - 2 * margin) / (max_x - min_x);
   float sy = (canvas.rows - 2 * margin) / (max_y - min_y);
@@ -97,14 +97,14 @@ void drawTrajectories(
   outScale  = cv::Point2f(s, s);
   outOffset = offset;
 
-  // 3) World→pixel mapping (flip Y so up is positive)
+  // World→pixel mapping (flip Y so up is positive)
   auto toCv = [&](const cv::Point2f &p) {
     float px = p.x * s + offset.x;
     float py = canvas.rows - (p.y * s + offset.y);
     return cv::Point2f(px, py);
   };
 
-  // 4) Draw lines for each trajectory
+  // Draw lines for each trajectory
   auto drawPath = [&](const std::vector<cv::Point2f>& pts,
                       cv::Scalar col, int thickness) {
     int N = std::min((int)pts.size(), frame_idx);
@@ -119,18 +119,14 @@ void drawTrajectories(
   drawPath(dr,       {  0, 255,   0}, 2);  // green   = odometry
   drawPath(ekf_pts,  {  0, 165, 255}, 2);  // orange  = EKF estimate
 
-  // 5) Draw observations as filled circles
+  // Draw observations as filled circles
   int M = std::min((int)obs.size(), frame_idx);
   for (int i = 0; i < M; ++i) {
     cv::circle(canvas, toCv(obs[i]), 2, {255,200,0}, -1);  // yellow
   }
 }
 
-/**
- * @brief Runs the EKF simulation, displays a live window, and optionally records MP4.
- *
- * @param recordVideo  If true, writes `ekf_demo.mp4` alongside live display.
- */
+
 void runSimulation(bool recordVideo)
 {
   // Simulation parameters
@@ -194,11 +190,11 @@ void runSimulation(bool recordVideo)
       u_phase = {1.0f, float(M_PI/10.0f)};
     }
 
-    // 1) Simulate true motion
+    // Simulate true motion
     x_gt = motionModel(x_gt, u_phase, dt);
     pts_gt.emplace_back(x_gt(0), x_gt(1));
 
-    // 2) Simulate noisy odometry
+    // Simulate noisy odometry
     Eigen::Vector2f u_noisy {
       u_phase(0) + noise(gen)*odom_std_v,
       u_phase(1) + noise(gen)*odom_std_w
@@ -206,27 +202,27 @@ void runSimulation(bool recordVideo)
     x_dr = motionModel(x_dr, u_noisy, dt);
     pts_dr.emplace_back(x_dr(0), x_dr(1));
 
-    // 3) Simulate noisy measurement
+    // Simulate noisy measurement
     Eigen::Vector2f z {
       x_gt(0) + noise(gen)*meas_std,
       x_gt(1) + noise(gen)*meas_std
     };
     pts_obs.emplace_back(z(0), z(1));
 
-    // 4) EKF predict & update
+    // EKF predict & update
     ekf.predict(u_noisy, dt);
     ekf.update(z);
     auto xk = ekf.state();
     pts_est.emplace_back(xk(0), xk(1));
 
-    // 5) Draw all trajectories with dynamic scaling
+    // Draw all trajectories with dynamic scaling
     cv::Point2f scale, offset;
     drawTrajectories(canvas,
                      pts_gt, pts_dr, pts_obs, pts_est,
                      scale, offset,
                      frame + 1);
 
-    // 6) Draw covariance ellipse in red
+    // Draw covariance ellipse in red
     {
       auto P = ekf.covariance();
       float Pxx = P(0,0), Pyy = P(1,1), Pxy = P(0,1);
@@ -243,7 +239,34 @@ void runSimulation(bool recordVideo)
                   cv::Scalar(0, 0, 255), 2);
     }
 
-    // 7) Display & record
+    // draw legend in the top-left corner
+    {
+      int lx = 10, ly = 20, spacing = 20, line_len = 30;
+      // Ground Truth (magenta)
+      cv::line(canvas, {lx, ly}, {lx + line_len, ly}, {255,0,255}, 2);
+      cv::putText(canvas, "Ground Truth", {lx + line_len + 5, ly + 5},
+                  cv::FONT_HERSHEY_SIMPLEX, 0.5, {255,0,255}, 1);
+      // Odometry (green)
+      cv::line(canvas, {lx, ly + spacing}, {lx + line_len, ly + spacing}, {0,255,0}, 2);
+      cv::putText(canvas, "Odometry", {lx + line_len + 5, ly + spacing + 5},
+                  cv::FONT_HERSHEY_SIMPLEX, 0.5, {0,255,0}, 1);
+      // Observations (yellow)
+      cv::circle(canvas, {lx + line_len/2, ly + 2*spacing}, 4, {255,200,0}, -1);
+      cv::putText(canvas, "Observations", {lx + line_len + 5, ly + 2*spacing + 5},
+                  cv::FONT_HERSHEY_SIMPLEX, 0.5, {255,200,0}, 1);
+      // EKF Estimate (orange)
+      cv::line(canvas, {lx, ly + 3*spacing}, {lx + line_len, ly + 3*spacing}, {0,165,255}, 2);
+      cv::putText(canvas, "EKF Estimate", {lx + line_len + 5, ly + 3*spacing + 5},
+                  cv::FONT_HERSHEY_SIMPLEX, 0.5, {0,165,255}, 1);
+      // Covariance (red ellipse)
+      cv::ellipse(canvas, cv::Point(lx + line_len/2, ly + 4*spacing),
+                  cv::Size(10,5), 0, 0, 360, {0,0,255}, 2);
+      cv::putText(canvas, "Covariance", {lx + line_len + 5, ly + 4*spacing + 5},
+                  cv::FONT_HERSHEY_SIMPLEX, 0.5, {0,0,255}, 1);
+    }
+
+
+    // Display & record
     cv::imshow("EKF Demo", canvas);
     if (recordVideo) writer.write(canvas);
     if (cv::waitKey(int(dt * 1000)) == 27) break;
